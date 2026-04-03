@@ -85,14 +85,28 @@ pnpm start:web    # Web UI mode
 ```bash
 cd mu
 
-# Build the image
+# 1. Configure environment (MU_BOT_API_KEY is the only required variable)
+cp .env.example .env
+# Edit .env — set MU_BOT_API_KEY at minimum, plus MU_BOT_API_BASE_URL and MU_BOT_MODEL if not using OpenAI
+
+# 2. Build and start with docker compose (recommended)
+docker compose up -d --build
+
+# 3. Verify it's running
+docker ps --filter name=mu
+curl http://localhost:3141/api/health
+# → {"status":"ok","uptime":...,"model":"..."}
+```
+
+The Web UI is available at **http://localhost:3141**.
+
+To view logs: `docker logs -f mu`
+To stop: `docker compose down`
+
+**Alternative — run without compose:**
+
+```bash
 docker build -t mu:latest .
-
-# Run with docker compose
-cp .env.example .env   # configure first
-docker compose up -d
-
-# Or run directly
 docker run -d \
   --name mu \
   -p 3141:3141 \
