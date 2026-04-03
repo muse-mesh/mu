@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+web/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs & sessions
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# mu data
+.mu/

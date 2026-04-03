@@ -1,0 +1,24 @@
+services:
+  mu:
+    build: .
+    container_name: mu
+    ports:
+      - "${MU_BOT_PORT:-3141}:3141"
+    env_file: .env
+    environment:
+      - MU_BOT_WEB_UI_ENABLED=true
+    volumes:
+      # Persist logs, sessions, memory across restarts
+      - mu-data:/home/mu/.mu
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  mu-data:
