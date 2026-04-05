@@ -4,13 +4,14 @@ import type { MuConfig } from '../config.js';
 import type { MuLogger } from '../logger.js';
 import type { Renderer } from './renderer.js';
 import type { AgentCallbacks } from '../agent.js';
+import type { CostTracker } from '../cost.js';
 import { userMessageEvent, sessionEndEvent } from '../logger.js';
 
 // ── REPL ───────────────────────────────────────────────────────────
 
 export async function runRepl(
   config: MuConfig,
-  agent: { generate: (prompt: string, callbacks?: AgentCallbacks) => Promise<any> },
+  agent: { generate: (prompt: string, callbacks?: AgentCallbacks) => Promise<any>; costTracker: CostTracker; extractMemories: (sessionId: string) => Promise<void> },
   logger: MuLogger,
   renderer: Renderer,
 ) {
@@ -37,6 +38,12 @@ export async function runRepl(
     rl.close();
     const totalDurationMs = Math.round(performance.now() - sessionStart);
     logger.log(sessionEndEvent(totalSteps, totalTokens, totalDurationMs));
+    const cost = agent.costTracker.getCost();
+    if (cost > 0) {
+      renderer.info(`Session cost: $${cost.toFixed(4)}`);
+    }
+    // Extract memories in background (don't block exit)
+    agent.extractMemories(logger.sessionId).catch(() => {});
     renderer.done(totalSteps, totalTokens, totalDurationMs, logger.sessionId);
     process.exit(0);
   });
@@ -101,6 +108,12 @@ export async function runRepl(
     rl.close();
     const totalDurationMs = Math.round(performance.now() - sessionStart);
     logger.log(sessionEndEvent(totalSteps, totalTokens, totalDurationMs));
+    const cost = agent.costTracker.getCost();
+    if (cost > 0) {
+      renderer.info(`Session cost: $${cost.toFixed(4)}`);
+    }
+    // Extract session memories before exit
+    await agent.extractMemories(logger.sessionId).catch(() => {});
     renderer.done(totalSteps, totalTokens, totalDurationMs, logger.sessionId);
   }
 }

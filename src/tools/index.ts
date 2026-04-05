@@ -46,6 +46,21 @@ for (const t of builtinTools) {
   registerTool(t);
 }
 
+// ── Step Counter ───────────────────────────────────────────────────
+
+let currentStep = 0;
+
+export function setCurrentStep(step: number) { currentStep = step; }
+
+// ── Per-request logger override ────────────────────────────────────
+// Web requests use this to inject a per-session logger so tool audit
+// events go to the right JSONL file instead of the app-level logger.
+
+let _requestLogger: MuLogger | null = null;
+
+export function setRequestLogger(logger: MuLogger | null) { _requestLogger = logger; }
+export function getRequestLogger(): MuLogger | null { return _requestLogger; }
+
 // ── 12-Step Execution Pipeline ─────────────────────────────────────
 // 1. Parse & validate input (Zod)
 // 2. Check tool enabled
@@ -66,10 +81,11 @@ function wrapTool(def: MuToolDef, config: MuConfig, logger: MuLogger) {
     description: def.description,
     inputSchema: def.inputSchema as any,
     execute: async (input: any, { toolCallId }: any) => {
-      const stepNumber = 0; // Tracked at agent level by onStepFinish
+      const stepNumber = currentStep;
       const startTs = performance.now();
+      const activeLogger = _requestLogger ?? logger;
 
-      logger.log(toolCallStartEvent(stepNumber, def.name, toolCallId, input));
+      activeLogger.log(toolCallStartEvent(stepNumber, def.name, toolCallId, input));
 
       try {
         // Step 3: Permission check
@@ -77,11 +93,11 @@ function wrapTool(def: MuToolDef, config: MuConfig, logger: MuLogger) {
 
         // Step 4: onBefore hook
         const ctx: ToolContext = {
-          sessionId: logger.sessionId,
+          sessionId: activeLogger.sessionId,
           stepNumber,
           toolCallId,
           config,
-          logger,
+          logger: activeLogger,
           abortSignal: new AbortController().signal,
         };
         if (def.onBefore) await def.onBefore(input, ctx);
@@ -111,7 +127,7 @@ function wrapTool(def: MuToolDef, config: MuConfig, logger: MuLogger) {
         if (def.onAfter) await def.onAfter(input, { ...result, output }, ctx);
 
         // Step 10: Log
-        logger.log(toolCallFinishEvent(stepNumber, def.name, toolCallId, output, durationMs, result.error));
+        activeLogger.log(toolCallFinishEvent(stepNumber, def.name, toolCallId, output, durationMs, result.error));
 
         // Step 11: Return
         if (result.error) {
@@ -128,7 +144,7 @@ function wrapTool(def: MuToolDef, config: MuConfig, logger: MuLogger) {
         } else {
           errorMsg = err.message;
         }
-        logger.log(toolCallFinishEvent(stepNumber, def.name, toolCallId, null, durationMs, errorMsg));
+        activeLogger.log(toolCallFinishEvent(stepNumber, def.name, toolCallId, null, durationMs, errorMsg));
         return JSON.stringify({ error: errorMsg });
       }
     },

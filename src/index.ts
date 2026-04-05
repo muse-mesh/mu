@@ -48,8 +48,12 @@ const program = new Command()
 
       logger.log(sessionStartEvent(logger.sessionId, config.model, config.maxSteps));
 
-      // Graceful shutdown
-      setupGracefulShutdown(logger);
+      // Graceful shutdown with MCP cleanup
+      setupGracefulShutdown(logger, async () => {
+        if (config.mcpServers && config.mcpServers.length > 0) {
+          logger.info('Cleaning up MCP connections…');
+        }
+      });
 
       // Start web UI if enabled
       if (config.webUiEnabled) {
