@@ -8,11 +8,14 @@ import { checkPermission, PermissionDeniedError } from '../permissions/index.js'
 // ── Built-in tool imports ──────────────────────────────────────────
 
 import { shellExec } from './shell-exec.js';
+import { shellExecBg } from './shell-exec-bg.js';
 import { fileRead } from './file-read.js';
 import { fileWrite } from './file-write.js';
 import { fileEdit } from './file-edit.js';
+import { multiFileEdit } from './multi-file-edit.js';
 import { globTool } from './glob.js';
 import { grepTool } from './grep.js';
+import { codeSearch } from './code-search.js';
 import { listDir } from './list-dir.js';
 import { httpFetch } from './http-fetch.js';
 import { systemInfo } from './system-info.js';
@@ -30,11 +33,14 @@ function registerTool(def: MuToolDef) {
 // Register all built-in tools
 const builtinTools: MuToolDef[] = [
   shellExec,
+  shellExecBg,
   fileRead,
   fileWrite,
   fileEdit,
+  multiFileEdit,
   globTool,
   grepTool,
+  codeSearch,
   listDir,
   httpFetch,
   systemInfo,
@@ -89,7 +95,7 @@ function wrapTool(def: MuToolDef, config: MuConfig, logger: MuLogger) {
 
       try {
         // Step 3: Permission check
-        await checkPermission(def, config.permissionMode as any);
+        await checkPermission(def, config.permissionMode as any, input);
 
         // Step 4: onBefore hook
         const ctx: ToolContext = {

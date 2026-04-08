@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import type { MuConfig } from '../config.js';
 import { createLogger, sessionStartEvent, userMessageEvent, stepFinishEvent, modelResponseEvent, sessionEndEvent, type MuLogger } from '../logger.js';
 import { setRequestLogger, setCurrentStep } from '../tools/index.js';
+import { setWebPrompter } from '../permissions/index.js';
+import { createWebPrompter } from '../permissions/web-prompt.js';
 import { streamText, stepCountIs, convertToModelMessages, type ToolSet, type UIMessage } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import {
@@ -130,6 +132,13 @@ export function createWebServer(config: MuConfig, tools: ToolSet, logger: MuLogg
     });
   });
 
+  // ── Permission system ──────────────────────────────────────────
+  // Create a server-level web prompter and activate it.
+  // In non-auto modes, tool calls that need approval will block until
+  // the browser responds via POST /api/permissions/:id/respond.
+  const webPrompter = createWebPrompter();
+  setWebPrompter(webPrompter);
+
   // ── Shared gateway info (updated per-request) ────────────────────
 
   let gatewayInfo = { rateLimitLimit: 0, rateLimitRemaining: 0, modelId: '' };
@@ -139,6 +148,26 @@ export function createWebServer(config: MuConfig, tools: ToolSet, logger: MuLogg
   // ── Models from OpenRouter ──────────────────────────────────────
 
   app.get('/api/models', (c) => c.json(getCachedModels()));
+
+  // ── Permission prompts (web mode) ───────────────────────────────
+
+  // Poll for pending permission requests (browser polls this while streaming)
+  app.get('/api/permissions/pending', (c) => {
+    return c.json(webPrompter.getPending());
+  });
+
+  // Respond to a pending permission request
+  app.post('/api/permissions/:id/respond', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const { decision } = body as { decision?: 'yes' | 'no' | 'always' };
+    if (!decision || !['yes', 'no', 'always'].includes(decision)) {
+      return c.json({ error: 'decision must be "yes", "no", or "always"' }, 400);
+    }
+    const ok = webPrompter.respond(id, decision);
+    if (!ok) return c.json({ error: 'Permission request not found or already resolved' }, 404);
+    return c.json({ ok: true });
+  });
 
   // ── AI SDK UI Streaming Chat ────────────────────────────────────
 

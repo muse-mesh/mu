@@ -19,7 +19,7 @@
 
 ---
 
-## Phase 2 — Tool System & Permissions ⚠️ ~90%
+## Phase 2 — Tool System & Permissions ✅ 100%
 
 - [x] `MuToolDef` interface with behavioral flags
 - [x] `buildTool()` factory with safe defaults
@@ -28,9 +28,9 @@
 - [x] Tool registry with enable/disable from config
 - [x] File tools: `file_read`, `file_write`, `file_edit`, `glob`, `grep`
 - [x] Shell tool: `shell_exec`
-- [ ] Shell tool: `shell_exec_bg` (background process manager)
-- [ ] Code tool: `code_search` (semantic grep / pattern matching)
-- [ ] Code tool: `multi_file_edit` (batch file editor with transactions)
+- [x] Shell tool: `shell_exec_bg` (background process manager)
+- [x] Code tool: `code_search` (semantic grep / pattern matching)
+- [x] Code tool: `multi_file_edit` (batch file editor with transactions)
 - [x] System tools: `http_fetch`, `list_dir`, `system_info`
 - [x] Agent tools: `think`, `task_complete`
 - [x] MCP client for external tool servers
@@ -41,7 +41,7 @@
 
 ---
 
-## Phase 3 — Web UI ⚠️ ~85%
+## Phase 3 — Web UI ✅ 100%
 
 - [x] Hono HTTP server with CORS
 - [x] AI SDK `useChat` streaming (replaces SSE architecture)
@@ -54,8 +54,8 @@
 - [x] OpenRouter model fetching + caching
 - [x] Session list sidebar with resume capability
 - [x] Dark/light theme toggle button
-- [ ] Browser-side permission approval modal
-- [ ] Step-by-step execution timeline component
+- [x] Browser-side permission approval modal
+- [x] Step-by-step execution timeline component
 
 ---
 

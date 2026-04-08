@@ -67,11 +67,14 @@ function truncate(str: string, len: number) {
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
   shell_exec: 'Shell',
+  shell_exec_bg: 'Background Process',
   file_read: 'Read File',
   file_write: 'Write File',
   file_edit: 'Edit File',
+  multi_file_edit: 'Multi-File Edit',
   glob: 'Find Files',
   grep: 'Search',
+  code_search: 'Code Search',
   list_dir: 'List Directory',
   http_fetch: 'HTTP Fetch',
   system_info: 'System Info',
@@ -97,6 +100,12 @@ function getToolSummary(toolName: string, input: unknown): string {
   switch (toolName) {
     case 'shell_exec':
       return data.command ? truncate(String(data.command), 80) : '';
+    case 'shell_exec_bg': {
+      if (!data.action) return '';
+      if (data.action === 'start') return `start: ${truncate(String(data.command || ''), 60)}`;
+      if (data.action === 'status' || data.action === 'stop') return `${data.action} PID ${data.pid}`;
+      return String(data.action);
+    }
     case 'file_read': {
       const p = String(data.path || data.file_path || '');
       const lines = data.startLine && data.endLine ? ` L${data.startLine}–${data.endLine}` : '';
@@ -110,6 +119,13 @@ function getToolSummary(toolName: string, input: unknown): string {
       return String(data.pattern || '');
     case 'grep':
       return data.pattern ? `"${truncate(String(data.pattern), 40)}"` : '';
+    case 'code_search':
+      return data.pattern ? `"${truncate(String(data.pattern), 40)}"` : '';
+    case 'multi_file_edit': {
+      const edits = data.edits as Array<{ path: string }> | undefined;
+      if (!edits?.length) return '';
+      return edits.length === 1 ? edits[0].path : `${edits.length} files`;
+    }
     case 'list_dir':
       return String(data.path || '.');
     case 'http_fetch':
@@ -314,6 +330,28 @@ function AppInner() {
 
   const isActive = status === 'streaming' || status === 'submitted';
 
+  // Poll for pending permission requests while agent is running
+  const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([]);
+  useEffect(() => {
+    if (!isActive && pendingPermissions.length === 0) return;
+    const interval = setInterval(() => {
+      fetch('/api/permissions/pending')
+        .then((r) => r.json())
+        .then((data) => { if (Array.isArray(data)) setPendingPermissions(data); })
+        .catch(() => {});
+    }, 600);
+    return () => clearInterval(interval);
+  }, [isActive, pendingPermissions.length]);
+
+  const handlePermissionResponse = useCallback(async (id: string, decision: 'yes' | 'no' | 'always') => {
+    await fetch(`/api/permissions/${id}/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    }).catch(() => {});
+    setPendingPermissions((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
   // Compute session-level usage from message metadata
   const sessionStats = useMemo(() => {
     let inputTokens = 0;
@@ -466,6 +504,13 @@ function AppInner() {
 
   return (
     <div id="app">
+      {/* Permission approval modal — shown when agent is waiting for browser approval */}
+      {pendingPermissions.length > 0 && (
+        <PermissionModal
+          permission={pendingPermissions[0]}
+          onRespond={handlePermissionResponse}
+        />
+      )}
       <div id="main">
         {/* Sidebar */}
         <aside id="sidebar" className={sidebarOpen ? '' : 'sidebar-collapsed'}>
@@ -873,6 +918,7 @@ function MessageRow({ message }: { message: UIMessage }) {
           }
           return null;
         })}
+        <StepTimeline parts={message.parts as any} />
       </div>
       {meta?.usage && (
         <div className="message-meta">
@@ -1125,6 +1171,81 @@ function ToolPart({ part }: { part: DynamicToolPart }) {
         );
       }
 
+      case 'shell_exec_bg': {
+        const pid = data?.pid as number | undefined;
+        const action = inputData.action as string | undefined;
+        const running = data?.running as boolean | undefined;
+        const stdout = String(data?.stdout || '');
+        const stderr = String(data?.stderr || '');
+        return (
+          <div className="tool-custom-content">
+            {pid != null && (
+              <div className="tool-shell-meta">
+                <span>PID {pid}</span>
+                {running != null && (
+                  <span className={running ? 'tool-exit-ok' : 'tool-exit-fail'}>
+                    {running ? 'running' : 'stopped'}
+                  </span>
+                )}
+              </div>
+            )}
+            {stdout && <pre className="tool-shell-output">{stdout.length > 3000 ? stdout.slice(0, 3000) + '\n… [truncated]' : stdout}</pre>}
+            {stderr && <pre className="tool-shell-stderr">{stderr.length > 1000 ? stderr.slice(0, 1000) + '\n… [truncated]' : stderr}</pre>}
+          </div>
+        );
+      }
+
+      case 'code_search': {
+        const matches = data?.matches as Array<{ file: string; line: number; content: string }> | undefined;
+        const totalMatches = data?.totalMatches as number | undefined;
+        const engine = String(data?.engine || '');
+        return (
+          <div className="tool-custom-content">
+            {totalMatches != null && (
+              <div className="tool-file-meta">
+                {totalMatches} match{totalMatches !== 1 ? 'es' : ''}
+                {engine && <span style={{ opacity: 0.6, marginLeft: 8 }}> via {engine}</span>}
+              </div>
+            )}
+            {matches && matches.length > 0 && (
+              <div className="tool-grep-results">
+                {matches.slice(0, 50).map((m, i) => (
+                  <div key={i} className="tool-grep-line">
+                    <span className="tool-grep-file">{m.file}</span>
+                    <span className="tool-grep-linenum">:{m.line}</span>
+                    <span className="tool-grep-content">{m.content}</span>
+                  </div>
+                ))}
+                {matches.length > 50 && <div className="tool-file-meta">… and {matches.length - 50} more</div>}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'multi_file_edit': {
+        const results = data?.results as Array<{ path: string; success: boolean; diff?: string; error?: string }> | undefined;
+        const filesModified = data?.filesModified as number | undefined;
+        return (
+          <div className="tool-custom-content">
+            {filesModified != null && (
+              <div className="tool-file-meta">{filesModified} file{filesModified !== 1 ? 's' : ''} modified</div>
+            )}
+            {results && results.map((r, i) => (
+              <div key={i} className="tool-multi-edit-file">
+                <div className={`tool-multi-edit-path ${r.success ? 'ok' : 'fail'}`}>
+                  {r.success ? '✓' : '✗'} {r.path}
+                </div>
+                {r.diff && (
+                  <pre className="tool-diff-output">{r.diff.length > 2000 ? r.diff.slice(0, 2000) + '\n…' : r.diff}</pre>
+                )}
+                {r.error && <div className="tool-error-output">{r.error}</div>}
+              </div>
+            ))}
+          </div>
+        );
+      }
+
       case 'system_info': {
         if (!data || typeof data !== 'object') return null;
         const entries = Object.entries(data as Record<string, unknown>);
@@ -1217,3 +1338,140 @@ function EmptyState({ onPrompt }: { onPrompt: (text: string) => void }) {
     </div>
   );
 }
+
+// ── Permission Modal ────────────────────────────────────────────────
+
+interface PendingPermission {
+  id: string;
+  toolName: string;
+  description: string;
+  input?: unknown;
+  createdAt: string;
+}
+
+function PermissionModal({ permission, onRespond }: {
+  permission: PendingPermission;
+  onRespond: (id: string, decision: 'yes' | 'no' | 'always') => void;
+}) {
+  const inputStr = permission.input
+    ? JSON.stringify(permission.input, null, 2)
+    : null;
+
+  return (
+    <div className="permission-overlay">
+      <div className="permission-modal">
+        <div className="permission-header">
+          <span className="permission-icon">🔐</span>
+          <span className="permission-title">Permission Required</span>
+        </div>
+        <div className="permission-body">
+          <div className="permission-tool-name">{permission.toolName}</div>
+          <div className="permission-description">{permission.description}</div>
+          {inputStr && (
+            <pre className="permission-input">{
+              inputStr.length > 500 ? inputStr.slice(0, 500) + '\n…' : inputStr
+            }</pre>
+          )}
+        </div>
+        <div className="permission-actions">
+          <button
+            className="permission-btn permission-deny"
+            onClick={() => onRespond(permission.id, 'no')}
+          >
+            Deny
+          </button>
+          <button
+            className="permission-btn permission-allow-once"
+            onClick={() => onRespond(permission.id, 'yes')}
+          >
+            Allow Once
+          </button>
+          <button
+            className="permission-btn permission-allow-always"
+            onClick={() => onRespond(permission.id, 'always')}
+          >
+            Allow Always
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Step Timeline ───────────────────────────────────────────────────
+
+interface StepInfo {
+  index: number;
+  toolCalls: Array<{ toolName: string; state: string; errorText?: string }>;
+  hasText: boolean;
+}
+
+function buildSteps(parts: Array<{ type: string; [key: string]: unknown }>): StepInfo[] {
+  const steps: StepInfo[] = [];
+  let current: StepInfo | null = null;
+
+  for (const part of parts) {
+    if (part.type === 'step-start') {
+      current = { index: steps.length + 1, toolCalls: [], hasText: false };
+      steps.push(current);
+    } else if (current) {
+      const partType = part.type as string;
+      if (partType === 'dynamic-tool' || partType.startsWith('tool-')) {
+        const tp = part as any;
+        const toolName: string = tp.toolName ?? partType.slice(5);
+        if (toolName) {
+          current.toolCalls.push({ toolName, state: tp.state ?? '', errorText: tp.errorText });
+        }
+      } else if (part.type === 'text' && typeof part.text === 'string' && (part.text as string).trim()) {
+        current.hasText = true;
+      }
+    }
+  }
+  return steps;
+}
+
+function StepTimeline({ parts }: { parts: Array<{ type: string; [key: string]: unknown }> }) {
+  const [open, setOpen] = useState(false);
+  const steps = buildSteps(parts);
+  if (steps.length < 2) return null; // only meaningful for multi-step
+
+  return (
+    <div className="step-timeline">
+      <button className="step-timeline-toggle" onClick={() => setOpen((o) => !o)}>
+        <svg
+          className={`timeline-chevron${open ? ' open' : ''}`}
+          width="10" height="10" viewBox="0 0 10 10" fill="none"
+        >
+          <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <span>{steps.length} steps</span>
+      </button>
+      {open && (
+        <div className="step-timeline-body">
+          {steps.map((step) => (
+            <div key={step.index} className="step-timeline-row">
+              <span className="step-timeline-num">Step {step.index}</span>
+              <div className="step-timeline-calls">
+                {step.toolCalls.map((tc, i) => (
+                  <span
+                    key={i}
+                    className={`step-timeline-tool${tc.state === 'output-error' ? ' error' : ''}`}
+                  >
+                    {getToolDisplayName(tc.toolName)}
+                  </span>
+                ))}
+                {step.hasText && step.toolCalls.length === 0 && (
+                  <span className="step-timeline-tool text">text response</span>
+                )}
+                {step.hasText && step.toolCalls.length > 0 && (
+                  <span className="step-timeline-tool text">+ response</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
